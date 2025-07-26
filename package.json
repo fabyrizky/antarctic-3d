@@ -1,0 +1,9 @@
+{
+  "name": "antarctic-3d",
+  "version": "1.0.0",
+  "description": "3D Antarctic Explorer",
+  "scripts": {
+    "dev": "python -m http.server 8000",
+    "build": "echo 'No build required'"
+  }
+}
