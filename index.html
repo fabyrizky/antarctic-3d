@@ -34,21 +34,388 @@
             margin: 5px;
             padding: 5px 10px;
             cursor: pointer;
+            background: #4299E1;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #3182CE;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            background: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
         }
     </style>
 </head>
 <body>
-    <div id="info">
+    <div id="loading">Loading Antarctic Scene...</div>
+    <div id="info" style="display: none;">
         <h3>Antarctic Explorer</h3>
         <p>Use mouse to rotate | Scroll to zoom | Arrow keys to move</p>
     </div>
-    <div id="controls">
-        <button onclick="goToLocation('icebergs')">Icebergs</button>
-        <button onclick="goToLocation('mountains')">Mountains</button>
-        <button onclick="goToLocation('penguins')">Penguin Colony</button>
-        <button onclick="toggleWeather()">Toggle Snow</button>
+    <div id="controls" style="display: none;">
+        <button onclick="goToLocation('icebergs')">🧊 Icebergs</button>
+        <button onclick="goToLocation('mountains')">🏔️ Mountains</button>
+        <button onclick="goToLocation('penguins')">🐧 Penguin Colony</button>
+        <button onclick="toggleWeather()">❄️ Toggle Snow</button>
     </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="app.js"></script>
+    <script>
+        // Wait for Three.js to load
+        window.addEventListener('load', function() {
+            initScene();
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('info').style.display = 'block';
+            document.getElementById('controls').style.display = 'block';
+        });
+
+        let scene, camera, renderer;
+        let snowParticles, snowEnabled = true;
+        let mouseX = 0, mouseY = 0;
+        let targetX = 0, targetY = 0;
+        let ocean, penguinGroup;
+
+        function initScene() {
+            // Scene setup
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0xccddff, 0.002);
+            
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 10, 30);
+            
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.setClearColor(0x87CEEB);
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(50, 100, 50);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+
+            // Sky
+            const skyGeometry = new THREE.SphereGeometry(500, 32, 32);
+            const skyMaterial = new THREE.MeshBasicMaterial({
+                color: 0x87CEEB,
+                side: THREE.BackSide
+            });
+            const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+            scene.add(sky);
+
+            // Terrain
+            const terrainGeometry = new THREE.PlaneGeometry(200, 200, 50, 50);
+            const terrainMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xffffff,
+                shininess: 10
+            });
+            
+            // Add terrain variation
+            const vertices = terrainGeometry.attributes.position.array;
+            for (let i = 0; i < vertices.length; i += 3) {
+                vertices[i + 2] = Math.random() * 2 - 1;
+            }
+            terrainGeometry.computeVertexNormals();
+            
+            const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
+            terrain.rotation.x = -Math.PI / 2;
+            terrain.receiveShadow = true;
+            scene.add(terrain);
+
+            // Ocean
+            const oceanGeometry = new THREE.PlaneGeometry(300, 300);
+            const oceanMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x006994,
+                transparent: true,
+                opacity: 0.8
+            });
+            ocean = new THREE.Mesh(oceanGeometry, oceanMaterial);
+            ocean.rotation.x = -Math.PI / 2;
+            ocean.position.y = -1;
+            scene.add(ocean);
+
+            // Create icebergs
+            createIcebergs();
+            
+            // Create mountains
+            createMountains();
+            
+            // Create penguins
+            createPenguins();
+            
+            // Create seals
+            createSeals();
+            
+            // Create snow
+            createSnow();
+            
+            // Setup controls
+            setupControls();
+            
+            // Start animation
+            animate();
+        }
+
+        function createIcebergs() {
+            const icebergGroup = new THREE.Group();
+            
+            function createIceberg(x, z, scale) {
+                const geometry = new THREE.IcosahedronGeometry(5 * scale, 0);
+                const material = new THREE.MeshPhongMaterial({ 
+                    color: 0xe0f4ff,
+                    shininess: 100
+                });
+                const iceberg = new THREE.Mesh(geometry, material);
+                iceberg.position.set(x, scale * 2, z);
+                iceberg.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+                iceberg.scale.set(1, 0.7, 1);
+                iceberg.castShadow = true;
+                iceberg.receiveShadow = true;
+                return iceberg;
+            }
+
+            icebergGroup.add(createIceberg(-30, -20, 1.5));
+            icebergGroup.add(createIceberg(-40, -30, 1));
+            icebergGroup.add(createIceberg(-25, -35, 0.8));
+            scene.add(icebergGroup);
+        }
+
+        function createMountains() {
+            const mountainGroup = new THREE.Group();
+            
+            function createMountain(x, z, height) {
+                const geometry = new THREE.ConeGeometry(15, height, 6);
+                const material = new THREE.MeshPhongMaterial({ 
+                    color: 0xcccccc,
+                    flatShading: true
+                });
+                const mountain = new THREE.Mesh(geometry, material);
+                mountain.position.set(x, height/2, z);
+                mountain.castShadow = true;
+                
+                // Snow cap
+                const snowGeometry = new THREE.ConeGeometry(15, height * 0.3, 6);
+                const snowMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
+                const snowCap = new THREE.Mesh(snowGeometry, snowMaterial);
+                snowCap.position.y = height * 0.35;
+                mountain.add(snowCap);
+                
+                return mountain;
+            }
+
+            mountainGroup.add(createMountain(40, -40, 30));
+            mountainGroup.add(createMountain(60, -50, 25));
+            mountainGroup.add(createMountain(50, -60, 35));
+            scene.add(mountainGroup);
+        }
+
+        function createPenguins() {
+            penguinGroup = new THREE.Group();
+            
+            function createPenguin(x, z) {
+                const group = new THREE.Group();
+                
+                // Body (using box geometry as fallback)
+                const bodyGeometry = new THREE.BoxGeometry(3, 4, 2);
+                const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
+                const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+                body.position.y = 2;
+                group.add(body);
+                
+                // Belly
+                const bellyGeometry = new THREE.BoxGeometry(2.5, 3.5, 1);
+                const bellyMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
+                const belly = new THREE.Mesh(bellyGeometry, bellyMaterial);
+                belly.position.set(0, 2, 0.6);
+                group.add(belly);
+                
+                // Head
+                const headGeometry = new THREE.SphereGeometry(0.8);
+                const head = new THREE.Mesh(headGeometry, bodyMaterial);
+                head.position.y = 4.5;
+                group.add(head);
+                
+                // Beak
+                const beakGeometry = new THREE.ConeGeometry(0.2, 0.5, 4);
+                const beakMaterial = new THREE.MeshPhongMaterial({ color: 0xff6600 });
+                const beak = new THREE.Mesh(beakGeometry, beakMaterial);
+                beak.position.set(0, 4.5, 0.8);
+                beak.rotation.x = Math.PI / 2;
+                group.add(beak);
+                
+                group.position.set(x, 0, z);
+                group.scale.set(0.8, 0.8, 0.8);
+                group.userData.animationOffset = Math.random() * Math.PI * 2;
+                
+                return group;
+            }
+
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2;
+                const radius = 5 + Math.random() * 3;
+                penguinGroup.add(createPenguin(
+                    Math.cos(angle) * radius + 20,
+                    Math.sin(angle) * radius + 20
+                ));
+            }
+            scene.add(penguinGroup);
+        }
+
+        function createSeals() {
+            function createSeal(x, z) {
+                const group = new THREE.Group();
+                
+                const bodyGeometry = new THREE.BoxGeometry(4, 2, 2);
+                const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x4a4a4a });
+                const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+                body.position.y = 0.5;
+                group.add(body);
+                
+                const headGeometry = new THREE.SphereGeometry(0.6);
+                const head = new THREE.Mesh(headGeometry, bodyMaterial);
+                head.position.set(2.3, 0.8, 0);
+                group.add(head);
+                
+                group.position.set(x, 0, z);
+                group.rotation.y = Math.random() * Math.PI * 2;
+                return group;
+            }
+
+            scene.add(createSeal(-10, 10));
+            scene.add(createSeal(-15, 15));
+        }
+
+        function createSnow() {
+            const geometry = new THREE.BufferGeometry();
+            const vertices = [];
+            
+            for (let i = 0; i < 1000; i++) {
+                vertices.push(
+                    Math.random() * 200 - 100,
+                    Math.random() * 100,
+                    Math.random() * 200 - 100
+                );
+            }
+            
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            
+            const material = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.5,
+                transparent: true,
+                opacity: 0.8
+            });
+            
+            snowParticles = new THREE.Points(geometry, material);
+            scene.add(snowParticles);
+        }
+
+        function setupControls() {
+            document.addEventListener('mousemove', (event) => {
+                mouseX = (event.clientX - window.innerWidth / 2) / (window.innerWidth / 2);
+                mouseY = (event.clientY - window.innerHeight / 2) / (window.innerHeight / 2);
+            });
+
+            document.addEventListener('wheel', (event) => {
+                camera.position.z += event.deltaY * 0.05;
+                camera.position.z = Math.max(10, Math.min(100, camera.position.z));
+            });
+
+            const keys = {};
+            document.addEventListener('keydown', (event) => keys[event.key] = true);
+            document.addEventListener('keyup', (event) => keys[event.key] = false);
+
+            // Update camera based on keys
+            setInterval(() => {
+                if (keys['ArrowLeft']) targetX -= 1;
+                if (keys['ArrowRight']) targetX += 1;
+                if (keys['ArrowUp']) targetY -= 1;
+                if (keys['ArrowDown']) targetY += 1;
+            }, 50);
+        }
+
+        function goToLocation(location) {
+            switch(location) {
+                case 'icebergs':
+                    targetX = -30;
+                    targetY = -25;
+                    break;
+                case 'mountains':
+                    targetX = 50;
+                    targetY = -50;
+                    break;
+                case 'penguins':
+                    targetX = 20;
+                    targetY = 20;
+                    break;
+            }
+        }
+
+        function toggleWeather() {
+            snowEnabled = !snowEnabled;
+            if (snowParticles) snowParticles.visible = snowEnabled;
+        }
+
+        let time = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.01;
+
+            // Camera movement
+            camera.position.x += (targetX - camera.position.x) * 0.05;
+            camera.position.z += (targetY - camera.position.z) * 0.05;
+            
+            camera.position.x += mouseX * 0.5;
+            camera.position.y = 10 + mouseY * 5;
+            camera.lookAt(targetX, 0, targetY);
+
+            // Animate snow
+            if (snowEnabled && snowParticles) {
+                const positions = snowParticles.geometry.attributes.position.array;
+                for (let i = 1; i < positions.length; i += 3) {
+                    positions[i] -= 0.1;
+                    if (positions[i] < 0) positions[i] = 100;
+                }
+                snowParticles.geometry.attributes.position.needsUpdate = true;
+            }
+
+            // Animate penguins
+            if (penguinGroup) {
+                penguinGroup.children.forEach((penguin) => {
+                    penguin.rotation.y = Math.sin(time + penguin.userData.animationOffset) * 0.3;
+                });
+            }
+
+            // Animate ocean
+            if (ocean) {
+                ocean.position.y = -1 + Math.sin(time) * 0.2;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
 </body>
 </html>
