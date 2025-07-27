@@ -53,6 +53,79 @@
             padding: 20px;
             border-radius: 10px;
         }
+        #minimap {
+            position: absolute; 
+            bottom: 10px; 
+            right: 10px; 
+            width: 150px; 
+            height: 150px; 
+            background: rgba(0,0,0,0.7); 
+            border-radius: 5px; 
+            overflow: hidden; 
+            z-index: 100;
+        }
+        #player-indicator {
+            position: absolute; 
+            top: 75px; 
+            left: 75px; 
+            width: 6px; 
+            height: 6px; 
+            background: red; 
+            border-radius: 50%; 
+            transform: translate(-3px, -3px);
+        }
+        #chat-assistant {
+            position: absolute; 
+            right: 10px; 
+            top: 10px; 
+            width: 300px; 
+            background: rgba(0,0,0,0.7); 
+            color: white; 
+            border-radius: 5px; 
+            z-index: 100; 
+            overflow: hidden; 
+            transition: height 0.3s ease;
+        }
+        #chat-header {
+            padding: 10px; 
+            cursor: pointer; 
+            background: rgba(0,0,100,0.5);
+        }
+        #chat-content {
+            height: 300px; 
+            overflow-y: auto; 
+            padding: 10px; 
+            display: none;
+        }
+        #chat-input {
+            flex-grow: 1; 
+            padding: 5px; 
+            border-radius: 3px; 
+            border: none;
+        }
+        #chat-send {
+            margin-left: 5px; 
+            background: #4299E1; 
+            color: white; 
+            border: none; 
+            border-radius: 3px; 
+            padding: 5px 10px;
+        }
+        .user-message {
+            margin-bottom: 10px; 
+            padding: 8px; 
+            border-radius: 5px; 
+            max-width: 80%; 
+            background: #4299E1; 
+            margin-left: auto;
+        }
+        .assistant-message {
+            margin-bottom: 10px; 
+            padding: 8px; 
+            border-radius: 5px; 
+            max-width: 80%; 
+            background: #718096;
+        }
     </style>
 </head>
 <body>
@@ -66,6 +139,29 @@
         <button onclick="goToLocation('mountains')">🏔️ Mountains</button>
         <button onclick="goToLocation('penguins')">🐧 Penguin Colony</button>
         <button onclick="toggleWeather()">❄️ Toggle Snow</button>
+        <button onclick="toggleAudio()" id="audioBtn">🔊 Toggle Audio</button>
+        <button onclick="toggleViewMode()" id="viewModeBtn">🎮 First Person</button>
+    </div>
+    
+    <div id="minimap">
+        <canvas id="minimapCanvas" width="150" height="150"></canvas>
+        <div id="player-indicator"></div>
+    </div>
+    
+    <div id="chat-assistant">
+        <div id="chat-header">
+            <span>🐧 Antarctic Guide</span>
+            <span style="float: right" id="chat-toggle">▼</span>
+        </div>
+        <div id="chat-content">
+            <div id="chat-messages">
+                <div class="assistant-message">Welcome to Antarctic Explorer! I'm your virtual guide. Click on objects to learn more, or ask me a question about Antarctica!</div>
+            </div>
+            <div style="display: flex; padding-top: 10px;">
+                <input type="text" id="chat-input" placeholder="Ask a question...">
+                <button id="chat-send">Send</button>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -73,6 +169,7 @@
         // Wait for Three.js to load
         window.addEventListener('load', function() {
             initScene();
+            initMinimap();
             document.getElementById('loading').style.display = 'none';
             document.getElementById('info').style.display = 'block';
             document.getElementById('controls').style.display = 'block';
@@ -83,7 +180,10 @@
         let mouseX = 0, mouseY = 0;
         let targetX = 0, targetY = 0;
         let ocean, penguinGroup;
-
+        let controls;
+        let audioListener, ambientSound, windSound;
+        let firstPersonMode = false;
+        
         function initScene() {
             // Scene setup
             scene = new THREE.Scene();
@@ -168,6 +268,18 @@
             // Setup controls
             setupControls();
             
+            // Setup object interaction
+            setupObjectInteraction();
+            
+            // Setup touch controls
+            setupTouchControls();
+            
+            // Setup audio
+            setupAudio();
+            
+            // Initialize chat assistant
+            chatAssistant.init();
+            
             // Start animation
             animate();
         }
@@ -187,6 +299,8 @@
                 iceberg.scale.set(1, 0.7, 1);
                 iceberg.castShadow = true;
                 iceberg.receiveShadow = true;
+                iceberg.userData.type = 'iceberg';
+                iceberg.userData.description = 'Antarctic Iceberg - A large piece of freshwater ice broken off from a glacier.';
                 return iceberg;
             }
 
@@ -208,6 +322,8 @@
                 const mountain = new THREE.Mesh(geometry, material);
                 mountain.position.set(x, height/2, z);
                 mountain.castShadow = true;
+                mountain.userData.type = 'mountain';
+                mountain.userData.description = 'Antarctic Mountain - Part of the Transantarctic range that divides the continent.';
                 
                 // Snow cap
                 const snowGeometry = new THREE.ConeGeometry(15, height * 0.3, 6);
@@ -236,6 +352,8 @@
                 const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
                 const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
                 body.position.y = 2;
+                body.userData.type = 'penguin';
+                body.userData.description = 'Emperor Penguin - The largest penguin species, native to Antarctica.';
                 group.add(body);
                 
                 // Belly
@@ -243,12 +361,16 @@
                 const bellyMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
                 const belly = new THREE.Mesh(bellyGeometry, bellyMaterial);
                 belly.position.set(0, 2, 0.6);
+                belly.userData.type = 'penguin';
+                belly.userData.description = 'Emperor Penguin - The largest penguin species, native to Antarctica.';
                 group.add(belly);
                 
                 // Head
                 const headGeometry = new THREE.SphereGeometry(0.8);
                 const head = new THREE.Mesh(headGeometry, bodyMaterial);
                 head.position.y = 4.5;
+                head.userData.type = 'penguin';
+                head.userData.description = 'Emperor Penguin - The largest penguin species, native to Antarctica.';
                 group.add(head);
                 
                 // Beak
@@ -257,11 +379,17 @@
                 const beak = new THREE.Mesh(beakGeometry, beakMaterial);
                 beak.position.set(0, 4.5, 0.8);
                 beak.rotation.x = Math.PI / 2;
+                beak.userData.type = 'penguin';
+                beak.userData.description = 'Emperor Penguin - The largest penguin species, native to Antarctica.';
                 group.add(beak);
                 
                 group.position.set(x, 0, z);
                 group.scale.set(0.8, 0.8, 0.8);
                 group.userData.animationOffset = Math.random() * Math.PI * 2;
+                group.userData.type = 'penguin';
+                group.userData.description = 'Emperor Penguin - The largest penguin species, native to Antarctica.';
+                group.userData.diving = false;
+                group.userData.diveTime = 0;
                 
                 return group;
             }
@@ -285,15 +413,21 @@
                 const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x4a4a4a });
                 const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
                 body.position.y = 0.5;
+                body.userData.type = 'seal';
+                body.userData.description = 'Weddell Seal - Known for their cat-like faces and ability to dive deep for food.';
                 group.add(body);
                 
                 const headGeometry = new THREE.SphereGeometry(0.6);
                 const head = new THREE.Mesh(headGeometry, bodyMaterial);
                 head.position.set(2.3, 0.8, 0);
+                head.userData.type = 'seal';
+                head.userData.description = 'Weddell Seal - Known for their cat-like faces and ability to dive deep for food.';
                 group.add(head);
                 
                 group.position.set(x, 0, z);
                 group.rotation.y = Math.random() * Math.PI * 2;
+                group.userData.type = 'seal';
+                group.userData.description = 'Weddell Seal - Known for their cat-like faces and ability to dive deep for food.';
                 return group;
             }
 
@@ -327,14 +461,52 @@
         }
 
         function setupControls() {
+            // Add OrbitControls script
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js';
+            document.head.appendChild(script);
+            
+            script.onload = function() {
+                // Initialize orbit controls
+                controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+                controls.screenSpacePanning = false;
+                controls.minDistance = 5;
+                controls.maxDistance = 100;
+                controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent going below ground
+                
+                // Update sensitivity on slider change
+                const sensitivityControl = document.createElement('div');
+                sensitivityControl.style.cssText = 'margin-top: 10px;';
+                sensitivityControl.innerHTML = `
+                    <label for="sensitivity" style="color: white;">Camera Sensitivity: </label>
+                    <input type="range" id="sensitivity" min="0.1" max="2" step="0.1" value="1" 
+                           style="width: 100px; vertical-align: middle;">
+                `;
+                document.getElementById('controls').appendChild(sensitivityControl);
+                
+                document.getElementById('sensitivity').addEventListener('input', function(e) {
+                    const sensitivity = parseFloat(e.target.value);
+                    controls.rotateSpeed = sensitivity;
+                    controls.zoomSpeed = sensitivity;
+                });
+                
+                // Initially disable OrbitControls to use the original control scheme
+                controls.enabled = false;
+            };
+            
+            // Default mouse controls
             document.addEventListener('mousemove', (event) => {
                 mouseX = (event.clientX - window.innerWidth / 2) / (window.innerWidth / 2);
                 mouseY = (event.clientY - window.innerHeight / 2) / (window.innerHeight / 2);
             });
 
             document.addEventListener('wheel', (event) => {
-                camera.position.z += event.deltaY * 0.05;
-                camera.position.z = Math.max(10, Math.min(100, camera.position.z));
+                if (!controls || !controls.enabled) {
+                    camera.position.z += event.deltaY * 0.05;
+                    camera.position.z = Math.max(10, Math.min(100, camera.position.z));
+                }
             });
 
             const keys = {};
@@ -343,11 +515,315 @@
 
             // Update camera based on keys
             setInterval(() => {
-                if (keys['ArrowLeft']) targetX -= 1;
-                if (keys['ArrowRight']) targetX += 1;
-                if (keys['ArrowUp']) targetY -= 1;
-                if (keys['ArrowDown']) targetY += 1;
-            }, 50);
+                const moveSpeed = 0.5;
+                if (keys['ArrowLeft'] || keys['a']) targetX -= moveSpeed;
+                if (keys['ArrowRight'] || keys['d']) targetX += moveSpeed;
+                if (keys['ArrowUp'] || keys['w']) targetY -= moveSpeed;
+                if (keys['ArrowDown'] || keys['s']) targetY += moveSpeed;
+            }, 16);
+        }
+        
+        function setupObjectInteraction() {
+            // Create raycaster for object detection
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            
+            // Trackable objects
+            const interactiveObjects = [];
+            
+            // We'll collect objects once the scene is fully loaded
+            setTimeout(() => {
+                // Find all objects with userData.type
+                scene.traverse((object) => {
+                    if (object.userData && object.userData.type) {
+                        interactiveObjects.push(object);
+                    }
+                });
+            }, 1000);
+            
+            // Create tooltip element
+            const tooltip = document.createElement('div');
+            tooltip.style.cssText = 'position: absolute; padding: 10px; background: rgba(0,0,0,0.8); color: white; border-radius: 5px; display: none; pointer-events: none; z-index: 1000;';
+            document.body.appendChild(tooltip);
+            
+            // Track currently highlighted object
+            let highlightedObject = null;
+            const originalMaterials = new Map();
+            
+            // Highlight material
+            const highlightMaterial = new THREE.MeshPhongMaterial({
+                color: 0xffff00,
+                emissive: 0x555500,
+                shininess: 100
+            });
+            
+            // Mouse move event for hover detection
+            document.addEventListener('mousemove', (event) => {
+                // Update mouse position
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                
+                // Update raycaster
+                raycaster.setFromCamera(mouse, camera);
+                
+                // Check for intersections
+                const intersects = raycaster.intersectObjects(interactiveObjects, true);
+                
+                // Reset previous highlight
+                if (highlightedObject) {
+                    if (originalMaterials.has(highlightedObject)) {
+                        highlightedObject.material = originalMaterials.get(highlightedObject);
+                        originalMaterials.delete(highlightedObject);
+                    }
+                    highlightedObject = null;
+                    tooltip.style.display = 'none';
+                }
+                
+                // Set new highlight
+                if (intersects.length > 0) {
+                    highlightedObject = intersects[0].object;
+                    
+                    // Only highlight if it has a material
+                    if (highlightedObject.material && !(highlightedObject.material instanceof THREE.PointsMaterial)) {
+                        // Store original material
+                        originalMaterials.set(highlightedObject, highlightedObject.material);
+                        
+                        // Apply highlight material
+                        highlightedObject.material = highlightMaterial;
+                    }
+                    
+                    // Show tooltip
+                    tooltip.textContent = highlightedObject.userData.description || 'Antarctic Feature';
+                    tooltip.style.left = event.clientX + 10 + 'px';
+                    tooltip.style.top = event.clientY + 10 + 'px';
+                    tooltip.style.display = 'block';
+                }
+            });
+            
+            // Click event for object interaction
+            document.addEventListener('click', (event) => {
+                if (highlightedObject) {
+                    // Handle click based on object type
+                    if (highlightedObject.userData.type === 'penguin') {
+                        // Make penguin jump
+                        let penguin = highlightedObject;
+                        
+                        // If clicked on a child object, get the parent group
+                        if (penguin.parent && penguin.parent.userData && penguin.parent.userData.type === 'penguin') {
+                            penguin = penguin.parent;
+                        }
+                        
+                        const startTime = performance.now();
+                        const duration = 1000; // 1 second
+                        
+                        function animateJump(currentTime) {
+                            const elapsed = currentTime - startTime;
+                            if (elapsed < duration) {
+                                // Simple jump curve
+                                const progress = elapsed / duration;
+                                const jumpHeight = Math.sin(progress * Math.PI) * 2;
+                                penguin.position.y = jumpHeight;
+                                
+                                requestAnimationFrame(animateJump);
+                            } else {
+                                penguin.position.y = 0;
+                            }
+                        }
+                        
+                        requestAnimationFrame(animateJump);
+                    }
+                    
+                    // Show info in chat assistant
+                    chatAssistant.showInfo(highlightedObject.userData.type, highlightedObject.userData.description);
+                }
+            });
+        }
+        
+        function setupTouchControls() {
+            let touchStartX = 0;
+            let touchStartY = 0;
+            let touchMoveX = 0;
+            let touchMoveY = 0;
+            
+            // Single touch for camera rotation
+            document.addEventListener('touchstart', (event) => {
+                if (event.touches.length === 1) {
+                    touchStartX = event.touches[0].clientX;
+                    touchStartY = event.touches[0].clientY;
+                }
+            });
+            
+            document.addEventListener('touchmove', (event) => {
+                if (event.touches.length === 1) {
+                    touchMoveX = event.touches[0].clientX - touchStartX;
+                    touchMoveY = event.touches[0].clientY - touchStartY;
+                    
+                    mouseX = (touchMoveX / window.innerWidth) * 4;
+                    mouseY = (touchMoveY / window.innerHeight) * 4;
+                    
+                    // Prevent page scrolling
+                    event.preventDefault();
+                }
+            });
+            
+            document.addEventListener('touchend', () => {
+                mouseX = 0;
+                mouseY = 0;
+            });
+            
+            // Two-finger pinch for zoom
+            let initialPinchDistance = 0;
+            
+            function getDistance(touch1, touch2) {
+                const dx = touch1.clientX - touch2.clientX;
+                const dy = touch1.clientY - touch2.clientY;
+                return Math.sqrt(dx * dx + dy * dy);
+            }
+            
+            document.addEventListener('touchstart', (event) => {
+                if (event.touches.length === 2) {
+                    initialPinchDistance = getDistance(event.touches[0], event.touches[1]);
+                }
+            });
+            
+            document.addEventListener('touchmove', (event) => {
+                if (event.touches.length === 2) {
+                    const currentDistance = getDistance(event.touches[0], event.touches[1]);
+                    const pinchDelta = currentDistance - initialPinchDistance;
+                    
+                    // Adjust camera zoom
+                    camera.position.z -= pinchDelta * 0.1;
+                    camera.position.z = Math.max(10, Math.min(100, camera.position.z));
+                    
+                    initialPinchDistance = currentDistance;
+                    
+                    // Prevent page zooming
+                    event.preventDefault();
+                }
+            });
+            
+            // Add joystick for movement on mobile
+            const joystickContainer = document.createElement('div');
+            joystickContainer.style.cssText = 'position: absolute; left: 20px; bottom: 100px; width: 100px; height: 100px; background: rgba(255,255,255,0.2); border-radius: 50%; touch-action: none; z-index: 1000;';
+            
+            const joystick = document.createElement('div');
+            joystick.style.cssText = 'position: absolute; left: 35px; top: 35px; width: 30px; height: 30px; background: rgba(255,255,255,0.8); border-radius: 50%; touch-action: none;';
+            
+            joystickContainer.appendChild(joystick);
+            document.body.appendChild(joystickContainer);
+            
+            let joystickActive = false;
+            let joystickTouchId = null;
+            
+            joystickContainer.addEventListener('touchstart', (event) => {
+                if (!joystickActive) {
+                    joystickActive = true;
+                    joystickTouchId = event.touches[0].identifier;
+                    updateJoystickPosition(event.touches[0]);
+                }
+                event.preventDefault();
+            });
+            
+            document.addEventListener('touchmove', (event) => {
+                if (joystickActive) {
+                    for (let i = 0; i < event.touches.length; i++) {
+                        if (event.touches[i].identifier === joystickTouchId) {
+                            updateJoystickPosition(event.touches[i]);
+                            break;
+                        }
+                    }
+                }
+            });
+            
+            document.addEventListener('touchend', (event) => {
+                if (joystickActive) {
+                    for (let i = 0; i < event.changedTouches.length; i++) {
+                        if (event.changedTouches[i].identifier === joystickTouchId) {
+                            joystickActive = false;
+                            resetJoystick();
+                            break;
+                        }
+                    }
+                }
+            });
+            
+            function updateJoystickPosition(touch) {
+                const rect = joystickContainer.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                
+                let dx = touch.clientX - centerX;
+                let dy = touch.clientY - centerY;
+                
+                // Limit to container radius
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const maxDistance = rect.width / 2 - joystick.offsetWidth / 2;
+                
+                if (distance > maxDistance) {
+                    dx = (dx / distance) * maxDistance;
+                    dy = (dy / distance) * maxDistance;
+                }
+                
+                joystick.style.left = (rect.width / 2 + dx - joystick.offsetWidth / 2) + 'px';
+                joystick.style.top = (rect.height / 2 + dy - joystick.offsetHeight / 2) + 'px';
+                
+                // Update movement
+                const moveSpeed = 0.1;
+                targetX += dx * moveSpeed;
+                targetY += dy * moveSpeed;
+            }
+            
+            function resetJoystick() {
+                joystick.style.left = '35px';
+                joystick.style.top = '35px';
+            }
+            
+            // Show/hide mobile controls based on device
+            function detectMobile() {
+                return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            }
+            
+            if (!detectMobile()) {
+                joystickContainer.style.display = 'none';
+            }
+        }
+        
+        function setupAudio() {
+            audioListener = new THREE.AudioListener();
+            camera.add(audioListener);
+            
+            // Ambient ocean sounds
+            ambientSound = new THREE.Audio(audioListener);
+            const ambientLoader = new THREE.AudioLoader();
+            ambientLoader.load('https://assets.mixkit.co/sfx/preview/mixkit-sea-waves-loop-1196.mp3', function(buffer) {
+                ambientSound.setBuffer(buffer);
+                ambientSound.setLoop(true);
+                ambientSound.setVolume(0.5);
+            });
+            
+            // Wind sounds for snow effect
+            windSound = new THREE.Audio(audioListener);
+            const windLoader = new THREE.AudioLoader();
+            windLoader.load('https://assets.mixkit.co/sfx/preview/mixkit-blizzard-cold-winds-1153.mp3', function(buffer) {
+                windSound.setBuffer(buffer);
+                windSound.setLoop(true);
+                windSound.setVolume(0);
+            });
+        }
+        
+        function toggleAudio() {
+            if (!ambientSound || !ambientSound.buffer) return;
+            
+            const isPlaying = ambientSound.isPlaying;
+            if (isPlaying) {
+                ambientSound.pause();
+                if (windSound && windSound.isPlaying) windSound.pause();
+                document.getElementById('audioBtn').textContent = '🔇 Toggle Audio';
+            } else {
+                ambientSound.play();
+                if (windSound && snowEnabled) windSound.play();
+                document.getElementById('audioBtn').textContent = '🔊 Toggle Audio';
+            }
         }
 
         function goToLocation(location) {
@@ -370,20 +846,203 @@
         function toggleWeather() {
             snowEnabled = !snowEnabled;
             if (snowParticles) snowParticles.visible = snowEnabled;
+            
+            // Handle wind sound
+            if (windSound && windSound.buffer) {
+                if (snowEnabled) {
+                    // Fade in wind sound
+                    let vol = 0;
+                    const fadeInterval = setInterval(() => {
+                        vol += 0.05;
+                        windSound.setVolume(Math.min(0.8, vol));
+                        if (vol >= 0.8) clearInterval(fadeInterval);
+                    }, 100);
+                    if (ambientSound.isPlaying) windSound.play();
+                } else {
+                    // Fade out wind sound
+                    let vol = windSound.getVolume();
+                    const fadeInterval = setInterval(() => {
+                        vol -= 0.05;
+                        windSound.setVolume(Math.max(0, vol));
+                        if (vol <= 0) {
+                            clearInterval(fadeInterval);
+                            windSound.pause();
+                        }
+                    }, 100);
+                }
+            }
+        }
+        
+        function toggleViewMode() {
+            firstPersonMode = !firstPersonMode;
+            
+            if (firstPersonMode) {
+                // Switch to first person
+                document.getElementById('viewModeBtn').textContent = '🔍 Orbit View';
+                if (controls) controls.enabled = false;
+                camera.position.y = 2; // Eye level
+            } else {
+                // Switch to orbit
+                document.getElementById('viewModeBtn').textContent = '🎮 First Person';
+                if (controls) controls.enabled = true;
+                camera.position.y = 10; // Higher viewpoint
+            }
+        }
+        
+        function initMinimap() {
+            const canvas = document.getElementById('minimapCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            function updateMinimap() {
+                // Clear canvas
+                ctx.fillStyle = '#87CEEB';
+                ctx.fillRect(0, 0, 150, 150);
+                
+                // Draw terrain
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(25, 25, 100, 100);
+                
+                // Draw ocean
+                ctx.fillStyle = 'rgba(0, 105, 148, 0.8)';
+                ctx.fillRect(0, 0, 25, 150);
+                ctx.fillRect(0, 0, 150, 25);
+                ctx.fillRect(125, 0, 25, 150);
+                ctx.fillRect(0, 125, 150, 25);
+                
+                // Draw landmarks
+                // Icebergs
+                ctx.fillStyle = '#E0F4FF';
+                ctx.beginPath();
+                ctx.arc(45, 110, 8, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Mountains
+                ctx.fillStyle = '#CCCCCC';
+                ctx.beginPath();
+                ctx.moveTo(125, 125);
+                ctx.lineTo(135, 105);
+                ctx.lineTo(115, 105);
+                ctx.fill();
+                
+                // Penguins
+                ctx.fillStyle = '#000000';
+                ctx.beginPath();
+                ctx.arc(95, 55, 5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Update player position
+                const playerX = ((camera.position.x + 100) / 200) * 150;
+                const playerZ = ((camera.position.z + 100) / 200) * 150;
+                document.getElementById('player-indicator').style.left = `${playerX}px`;
+                document.getElementById('player-indicator').style.top = `${playerZ}px`;
+            }
+            
+            // Update minimap periodically
+            setInterval(updateMinimap, 100);
+        }
+        
+        function updatePenguins() {
+            if (!penguinGroup) return;
+            
+            penguinGroup.children.forEach((penguin, index) => {
+                // Basic waddle animation
+                penguin.rotation.y = Math.sin(time + penguin.userData.animationOffset) * 0.3;
+                
+                // Occasional diving behavior
+                if (Math.random() < 0.001) {
+                    penguin.userData.diving = true;
+                    penguin.userData.diveTime = 0;
+                }
+                
+                if (penguin.userData.diving) {
+                    penguin.userData.diveTime += 0.01;
+                    
+                    if (penguin.userData.diveTime < 1) {
+                        // Move toward water
+                        penguin.position.y = Math.max(0, 2 - penguin.userData.diveTime * 4);
+                    } else if (penguin.userData.diveTime < 3) {
+                        // Stay underwater
+                        penguin.position.y = -2;
+                    } else if (penguin.userData.diveTime < 4) {
+                        // Return to surface
+                        penguin.position.y = -2 + (penguin.userData.diveTime - 3) * 2;
+                    } else {
+                        // Reset
+                        penguin.position.y = 0;
+                        penguin.userData.diving = false;
+                    }
+                }
+            });
+        }
+        
+        function updateLighting(timeOfDay) {  // 0.0 to 1.0 representing 24 hours
+            const skyColors = {
+                dawn: 0xffd4a3,
+                day: 0x87CEEB,
+                dusk: 0xff9966,
+                night: 0x0a1a3f
+            };
+            
+            // Get sky mesh
+            let sky;
+            scene.traverse((obj) => {
+                if (obj.geometry && obj.geometry.type === 'SphereGeometry' && obj.geometry.parameters.radius >= 100) {
+                    sky = obj;
+                }
+            });
+            
+            if (!sky) return;
+            
+            // Transition sky color based on time
+            if(timeOfDay < 0.25) { // Night to dawn
+                sky.material.color.setHex(0x0a1a3f);
+            } else if(timeOfDay < 0.5) { // Dawn to day
+                sky.material.color.setHex(0x87CEEB);
+            } else if(timeOfDay < 0.75) { // Day to dusk
+                sky.material.color.setHex(0xff9966);
+            } else { // Dusk to night
+                sky.material.color.setHex(0x0a1a3f);
+            }
+            
+            // Adjust light intensity
+            scene.children.forEach(child => {
+                if (child instanceof THREE.DirectionalLight) {
+                    child.intensity = Math.sin(timeOfDay * Math.PI) * 0.8 + 0.2;
+                }
+            });
         }
 
         let time = 0;
+        let timeOfDay = 0;
+        
         function animate() {
             requestAnimationFrame(animate);
             time += 0.01;
-
-            // Camera movement
-            camera.position.x += (targetX - camera.position.x) * 0.05;
-            camera.position.z += (targetY - camera.position.z) * 0.05;
             
-            camera.position.x += mouseX * 0.5;
-            camera.position.y = 10 + mouseY * 5;
-            camera.lookAt(targetX, 0, targetY);
+            // Update time of day (complete cycle every 2 minutes)
+            timeOfDay = (timeOfDay + 0.0001) % 1;
+            updateLighting(timeOfDay);
+            
+            // Update camera based on control mode
+            if (controls && controls.enabled) {
+                controls.update();
+            } else if (firstPersonMode) {
+                // First person camera handling
+                camera.position.x += (targetX - camera.position.x) * 0.05;
+                camera.position.z += (targetY - camera.position.z) * 0.05;
+                camera.lookAt(
+                    camera.position.x + mouseX * 10,
+                    2 + mouseY * 2,
+                    camera.position.z - 10
+                );
+            } else {
+                // Original camera movement
+                camera.position.x += (targetX - camera.position.x) * 0.05;
+                camera.position.z += (targetY - camera.position.z) * 0.05;
+                camera.position.x += mouseX * 0.5;
+                camera.position.y = 10 + mouseY * 5;
+                camera.lookAt(targetX, 0, targetY);
+            }
 
             // Animate snow
             if (snowEnabled && snowParticles) {
@@ -396,11 +1055,7 @@
             }
 
             // Animate penguins
-            if (penguinGroup) {
-                penguinGroup.children.forEach((penguin) => {
-                    penguin.rotation.y = Math.sin(time + penguin.userData.animationOffset) * 0.3;
-                });
-            }
+            updatePenguins();
 
             // Animate ocean
             if (ocean) {
@@ -409,6 +1064,128 @@
 
             renderer.render(scene, camera);
         }
+
+        // Chat Assistant Implementation
+        const chatAssistant = {
+            messages: [],
+            isOpen: false,
+            
+            init: function() {
+                // Toggle chat visibility
+                document.getElementById('chat-header').addEventListener('click', () => {
+                    this.isOpen = !this.isOpen;
+                    document.getElementById('chat-content').style.display = this.isOpen ? 'block' : 'none';
+                    document.getElementById('chat-toggle').textContent = this.isOpen ? '▲' : '▼';
+                });
+                
+                // Send message on button click
+                document.getElementById('chat-send').addEventListener('click', () => {
+                    this.sendMessage();
+                });
+                
+                // Send message on Enter key
+                document.getElementById('chat-input').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.sendMessage();
+                    }
+                });
+                
+                // Add welcome message
+                this.addMessage('assistant', 'Welcome to Antarctic Explorer! I\'m your virtual guide. Click on objects to learn more, or ask me a question about Antarctica!');
+            },
+            
+            sendMessage: function() {
+                const input = document.getElementById('chat-input');
+                const message = input.value.trim();
+                
+                if (message) {
+                    // Add user message
+                    this.addMessage('user', message);
+                    
+                    // Process message and respond
+                    this.processMessage(message);
+                    
+                    // Clear input
+                    input.value = '';
+                }
+            },
+            
+            addMessage: function(sender, text) {
+                // Add to messages array
+                this.messages.push({
+                    sender,
+                    text
+                });
+                
+                // Create message element
+                const messageElement = document.createElement('div');
+                messageElement.className = sender + '-message';
+                messageElement.textContent = text;
+                
+                // Add to chat
+                document.getElementById('chat-messages').appendChild(messageElement);
+                
+                // Scroll to bottom
+                const chatContent = document.getElementById('chat-content');
+                chatContent.scrollTop = chatContent.scrollHeight;
+                
+                // Open chat if closed
+                if (!this.isOpen) {
+                    document.getElementById('chat-header').click();
+                }
+            },
+            
+            processMessage: function(message) {
+                // Convert to lowercase for easier matching
+                const lowerMessage = message.toLowerCase();
+                
+                // Check for specific keywords
+                if (lowerMessage.includes('penguin') || lowerMessage.includes('bird')) {
+                    this.addMessage('assistant', 'Emperor Penguins are the largest penguin species, standing up to 4 feet tall. They survive Antarctica\'s harsh climate with a thick layer of blubber and dense feathers. The males incubate eggs during winter while females hunt for food.');
+                }
+                else if (lowerMessage.includes('iceberg') || lowerMessage.includes('ice')) {
+                    this.addMessage('assistant', 'Icebergs are large pieces of freshwater ice that have broken off from glaciers. Only about 10% of an iceberg is visible above water - the rest remains hidden beneath the surface, making them dangerous for ships.');
+                }
+                else if (lowerMessage.includes('mountain')) {
+                    this.addMessage('assistant', 'Antarctica\'s Transantarctic Mountains extend 3,500km across the continent and can reach heights of over 4,500 meters. They\'re mostly covered in ice and snow year-round, with few exposed rocky areas called "nunataks".');
+                }
+                else if (lowerMessage.includes('seal')) {
+                    this.addMessage('assistant', 'Weddell seals are common in Antarctica, growing up to 600kg. They can dive over 600m deep and hold their breath for 80 minutes. Their specialized teeth help them create breathing holes through the ice.');
+                }
+                else if (lowerMessage.includes('how to') || lowerMessage.includes('control') || lowerMessage.includes('move')) {
+                    this.addMessage('assistant', 'Navigation Controls:\n- Mouse: Look around\n- Scroll: Zoom in/out\n- Arrow Keys/WASD: Move\n- Quick Travel Buttons: Jump to locations\n- First Person Toggle: Switch view modes\nClick on objects to interact with them!');
+                }
+                else if (lowerMessage.includes('cold') || lowerMessage.includes('temperature')) {
+                    this.addMessage('assistant', 'Antarctica is the coldest place on Earth. The lowest temperature ever recorded was -89.2°C (-128.6°F) at Vostok Station. The average winter temperature ranges from -40°C to -70°C (-40°F to -94°F).');
+                }
+                else if (lowerMessage.includes('hello') || lowerMessage.includes('hi ')) {
+                    this.addMessage('assistant', 'Hello! Welcome to Antarctica. What would you like to know about this frozen continent?');
+                }
+                else {
+                    this.addMessage('assistant', 'Antarctica is Earth\'s southernmost continent, containing the geographic South Pole. It\'s the fifth-largest continent, nearly twice the size of Australia, and is home to amazing wildlife adapted to extreme conditions. What specific aspect would you like to explore?');
+                }
+            },
+            
+            showInfo: function(type, description) {
+                // Show information about clicked objects
+                switch(type) {
+                    case 'penguin':
+                        this.addMessage('assistant', 'Emperor Penguin: These amazing birds huddle together for warmth in temperatures as low as -60°C. They can dive deeper than 500m and hold their breath for up to 20 minutes when hunting for fish and squid.');
+                        break;
+                    case 'iceberg':
+                        this.addMessage('assistant', 'Antarctic Iceberg: This massive ice formation likely calved from an ice shelf. Icebergs can last for years or even decades before melting completely. They provide habitats for seabirds and affect local ocean temperatures.');
+                        break;
+                    case 'mountain':
+                        this.addMessage('assistant', 'Antarctic Mountain: Part of the Transantarctic range that divides the continent. These mountains are largely covered in ice and snow, with only the peaks visible. Some are over 4,500 meters tall.');
+                        break;
+                    case 'seal':
+                        this.addMessage('assistant', 'Weddell Seal: These seals have adapted to life in the frigid Antarctic waters. They can stay submerged for up to 80 minutes and dive to depths of 600 meters when hunting for fish, squid, and crustaceans.');
+                        break;
+                    default:
+                        this.addMessage('assistant', description || 'This is an Antarctic feature worth exploring!');
+                }
+            }
+        };
 
         // Handle window resize
         window.addEventListener('resize', () => {
